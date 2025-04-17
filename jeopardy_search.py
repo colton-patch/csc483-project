@@ -1,11 +1,12 @@
 import collections
 import math
-import argparse
+import os
+import re
 
 
 class IRSystem:
 
-    def __init__(self, f):
+    def __init__(self, files):
         # Use lnc to weight terms in the documents:
         #   l: logarithmic tf
         #   n: no df
@@ -16,34 +17,56 @@ class IRSystem:
 
         self.docWeights = {}
 
-        for line in f:
-            tokens = line.lower().split()
-            docId = int(tokens[0])
-            termFreqs = collections.defaultdict(int)
+        for filename in files:
+            with open(os.path.join("./wiki-subset-20140602", filename), encoding="UTF-8") as f:
+                docName = None
+                tokens = []
 
-            # get frequencies
-            for token in tokens[1:]:
-                if token != "-":
-                    if (token not in termFreqs):
-                        termFreqs[token] = 0
-                    termFreqs[token] += 1
+                for line in f:
+                    line = line.strip()
 
-            sumSquares = 0
-            
-            for term in termFreqs:
-                # replace the values in termFreqs with the logarithmic vals
-                termFreqs[term] = 1 + math.log10(termFreqs[term])
-                # add the square of the logTf to get vector
-                sumSquares += termFreqs[term] ** 2
+                    # at the end of the article, process it's weights
+                    if line.startswith("[[") and line.endswith("]]"):
+                        if docName is not None and tokens:
+                            self._get_weights(docName, tokens)
 
-            sqrt = math.sqrt(sumSquares)
+                        # start new article, denoted by "[[article name]]"
+                        docName = line[2:-2]
+                        tokens = []
 
-            # make the entry for each document a dict with terms as keys
-            self.docWeights[docId] = collections.defaultdict(int)
+                    else:
+                        # add tokenized line to tokens
+                        lowerLine = line.lower()
+                        tokens += re.split(r'[^a-zA-Z0-9]+', lowerLine)
+                
+                # process last article
+                if docName is not None and tokens:
+                    self._get_weights(docName, tokens)
+                
+    def _get_weights(self, docName, tokens):
+        # get frequencies
+        termFreqs = collections.defaultdict(int)
+        for token in tokens:
+            if (token not in termFreqs):
+                termFreqs[token] = 0
+            termFreqs[token] += 1
 
-            # get normalized weight for each term
-            for term in termFreqs:
-                self.docWeights[docId][term] = termFreqs[term] / sqrt
+        sumSquares = 0
+        
+        for term in termFreqs:
+            # replace the values in termFreqs with the logarithmic vals
+            termFreqs[term] = 1 + math.log10(termFreqs[term])
+            # add the square of the logTf to get vector
+            sumSquares += termFreqs[term] ** 2
+
+        sqrt = math.sqrt(sumSquares)
+
+        # make the entry for each document a dict with terms as keys
+        self.docWeights[docName] = collections.defaultdict(int)
+
+        # get normalized weight for each term
+        for term in termFreqs:
+            self.docWeights[docName][term] = termFreqs[term] / sqrt
 
 
     def run_query(self, query):
@@ -93,10 +116,10 @@ class IRSystem:
 
         # get similarity score
         simScores = {}
-        for docId in self.docWeights:
-            simScores[docId] = 0
+        for docName in self.docWeights:
+            simScores[docName] = 0
             for term in queryWeights:
-                simScores[docId] += self.docWeights[docId][term] * queryWeights[term]             
+                simScores[docName] += self.docWeights[docName][term] * queryWeights[term]            
 
         # sort and get top 10
         result = sorted(simScores, key=simScores.get, reverse=True)[:10]
@@ -104,8 +127,8 @@ class IRSystem:
         return result
 
 
-def main(corpus):
-    ir = IRSystem(open(corpus, encoding="UTF-8"))
+def main():
+    ir = IRSystem(os.listdir("./wiki-subset-20140602"))
 
     while True:
         query = input('Query: ').strip()
@@ -116,8 +139,4 @@ def main(corpus):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("CORPUS",
-                        help="Path to file with the corpus")
-    args = parser.parse_args()
-    main(args.CORPUS)
+    main()
