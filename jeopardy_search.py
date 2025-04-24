@@ -1,19 +1,18 @@
+
 import collections
 import math
 import os
 import re
 
-
 class IRSystem:
-
     def __init__(self, files):
         # Use lnc to weight terms in the documents:
-        #   l: logarithmic tf
-        #   n: no df
-        #   c: cosine normalization
+        #   l: logarithmic tf
+        #   n: no df
+        #   c: cosine normalization
 
-        # Store the vecorized representation for each document
-        #   and whatever information you need to vectorize queries in _run_query(...)
+        # Store the vectorized representation for each document
+        #   and whatever information you need to vectorize queries in _run_query(...)
 
         self.docWeights = {}
 
@@ -21,38 +20,31 @@ class IRSystem:
             with open(os.path.join("./wiki-subset-20140602", filename), encoding="UTF-8") as f:
                 docName = None
                 tokens = []
-
                 for line in f:
                     line = line.strip()
-
-                    # at the end of the article, process it's weights
+                    # at the end of the article, process its weights
                     if line.startswith("[[") and line.endswith("]]"):
                         if docName is not None and tokens:
                             self._get_weights(docName, tokens)
-
                         # start new article, denoted by "[[article name]]"
                         docName = line[2:-2]
                         tokens = []
-
                     else:
                         # add tokenized line to tokens
                         lowerLine = line.lower()
-                        tokens += re.split(r'[^a-zA-Z0-9]+', lowerLine)
-                
+                        tokens += re.split(r'\W+', lowerLine) 
                 # process last article
                 if docName is not None and tokens:
-                    self._get_weights(docName, tokens)
-                
+                    self._get_weights(docName, tokens) 
     def _get_weights(self, docName, tokens):
         # get frequencies
         termFreqs = collections.defaultdict(int)
         for token in tokens:
-            if (token not in termFreqs):
-                termFreqs[token] = 0
-            termFreqs[token] += 1
+            if token:
+                termFreqs[token] += 1
 
         sumSquares = 0
-        
+
         for term in termFreqs:
             # replace the values in termFreqs with the logarithmic vals
             termFreqs[term] = 1 + math.log10(termFreqs[term])
@@ -70,25 +62,23 @@ class IRSystem:
 
 
     def run_query(self, query):
-        terms = query.lower().split()
+        terms = re.split(r'\W+', query.lower())
         return self._run_query(terms)
 
     def _run_query(self, terms):
         # Use ltn to weight terms in the query:
-        #   l: logarithmic tf
-        #   t: idf
-        #   n: no normalization
+        #   l: logarithmic tf
+        #   t: idf
+        #   n: no normalization
 
-        # Return the top-10 document for the query 'terms'
+        # Return the top-50 documents for the query 'terms'
 
-        # YOUR CODE GOES HERE
-        termFreqs = {}
-        
+        termFreqs = collections.defaultdict(int)
+
         # count term freqs
         for term in terms:
-            if term not in termFreqs:
-                termFreqs[term] = 0
-            termFreqs[term] += 1
+            if term:
+                termFreqs[term] += 1
 
         # replace term frequencies with logarithmic term frequencies
         for term in termFreqs:
@@ -96,14 +86,10 @@ class IRSystem:
 
         # get df
         docFreqs = collections.defaultdict(int)
-
         for term in termFreqs:
             for doc in self.docWeights:
-                if term in self.docWeights[doc] and self.docWeights[doc][term] != 0:
-                    if term not in docFreqs:
-                        docFreqs[term] = 0
+                if term in self.docWeights[doc]:
                     docFreqs[term] += 1
-
         # replace dfs with idfs
         n = len(self.docWeights)
         for term in docFreqs:
@@ -119,23 +105,35 @@ class IRSystem:
         for docName in self.docWeights:
             simScores[docName] = 0
             for term in queryWeights:
-                simScores[docName] += self.docWeights[docName][term] * queryWeights[term]            
+                simScores[docName] += self.docWeights[docName][term] * queryWeights[term] 
 
-        # sort and get top 10
-        result = sorted(simScores, key=simScores.get, reverse=True)[:10]
+        # sort and get top 50
+        result = sorted(simScores, key=simScores.get, reverse=True)[:100]
 
         return result
 
-# this is my branch
+def send_to_llm(query, results, expected_answer):
+    # Placeholder function to simulate sending query and results to an LLM and getting a response.
+    # In a real implementation, this function would interact with an LLM API.
+    response_from_llm = results[0] # Simulating that LLM returns the top result as the answer.
+    return response_from_llm == expected_answer.lower()
+
 def main():
     ir = IRSystem(os.listdir("./wiki-subset-20140602"))
 
-    while True:
-        query = input('Query: ').strip()
-        if query == 'exit':
-            break
-        results = ir.run_query(query)
-        print(results)
+    counter = 0
+
+    with open('questions.txt', 'r') as f:
+        lines = [line.strip().lower() for line in f.readlines()[:3]]
+ 
+    query = ' '.join(re.split(r'\W+', lines[0] + ' ' + lines[1]))
+    results = ir.run_query(query)
+    correct = send_to_llm(query, results, lines[2])
+
+    if correct:
+        counter += 1
+
+    print(f'Counter of Correct Answers: {counter}')
 
 
 if __name__ == '__main__':
