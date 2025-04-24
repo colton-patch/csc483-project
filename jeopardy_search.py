@@ -15,6 +15,7 @@ class IRSystem:
         #   and whatever information you need to vectorize queries in _run_query(...)
 
         self.docWeights = {}
+        self.docFreqs = collections.defaultdict(int)
 
         for filename in files:
             with open(os.path.join("./wiki-subset-20140602", filename), encoding="UTF-8") as f:
@@ -32,8 +33,14 @@ class IRSystem:
 
                     # add tokenized line to tokens
                     lowerLine = line.lower()
-                    tokens += re.sub(r'[^a-zA-Z0-9\s]', '', lowerLine).split()
-                
+                    curTokens = re.sub(r'[^a-zA-Z0-9\s]', '', lowerLine).split()
+                    for token in curTokens:
+                        tokens.append(token)
+
+                        # count doc frequency of tokens
+                        if token not in self.docFreqs:
+                            self.docFreqs[token] = 0
+                        self.docFreqs[token] += 1    
 
                 # process last article
                 if docName is not None and tokens:
@@ -47,6 +54,10 @@ class IRSystem:
             if token:
                 termFreqs[token] += 1
 
+                # make the entry for each term a dict with docNames as keys and weigths as values
+                if token not in self.docWeights:
+                    self.docWeights[token] = collections.defaultdict(int)
+
         sumSquares = 0
 
         for term in termFreqs:
@@ -57,12 +68,9 @@ class IRSystem:
 
         sqrt = math.sqrt(sumSquares)
 
-        # make the entry for each document a dict with terms as keys
-        self.docWeights[docName] = collections.defaultdict(int)
-
         # get normalized weight for each term
         for term in termFreqs:
-            self.docWeights[docName][term] = termFreqs[term] / sqrt
+            self.docWeights[term][docName] = termFreqs[term] / sqrt
 
 
     def run_query(self, query):
@@ -85,32 +93,29 @@ class IRSystem:
             if term:
                 termFreqs[term] += 1
 
-        # get df
-        docFreqs = collections.defaultdict(int)
+        # replace term frequencies with logarithmic term frequencies
         for term in termFreqs:
-            # replace term frequencies with logarithmic term frequencies
             termFreqs[term] = 1 + math.log10(termFreqs[term])
 
-            for doc in self.docWeights:
-                if term in self.docWeights[doc]:
-                    docFreqs[term] += 1
-
-        # replace dfs with idfs and calculate query weights
+        # calculate idfs and query weights
         n = len(self.docWeights)
         queryWeights = {}
-        for term in docFreqs:
-            docFreqs[term] = math.log10(n / docFreqs[term])
-            queryWeights[term] = termFreqs[term] * docFreqs[term]
+        for term in termFreqs:
+            if self.docFreqs[term] != 0:
+                idf = math.log10(n / self.docFreqs[term])
+            else:
+                idf = 0
+            queryWeights[term] = termFreqs[term] * idf
 
         # get similarity score
-        simScores = {}
-        for docName in self.docWeights:
-            simScores[docName] = 0
-            for term in queryWeights:
-                simScores[docName] += self.docWeights[docName][term] * queryWeights[term] 
+        simScores = collections.defaultdict(int)
+        for term in termFreqs:
+            if queryWeights[term] > 0:
+                for docName in self.docWeights[term]:
+                    simScores[docName] += self.docWeights[term][docName] * queryWeights[term] 
 
         # sort and get top 50
-        result = sorted(simScores, key=simScores.get, reverse=True)[:50]
+        result = sorted(simScores, key=simScores.get, reverse=True)[:500]
 
         return result
 
@@ -127,16 +132,26 @@ def main():
 
     with open('questions.txt', 'r') as f:
         lines = f.readlines()
+
     for i in range(0, len(lines), 4):
         if i + 2 >= len(lines):
             break
         queryLine = [lines[i].strip().lower(), lines[i+1].strip().lower()]
         query = re.sub(r'[^a-zA-Z0-9\s]', '', queryLine[0] +' '+queryLine[1])
-        print(query)
+        # print(query)
         results = ir.run_query(query)
+        # print(results)
+
+        # check against answers
         answer_line = lines[i+2].strip()
-        if answer_line in results:
-            counter += 1
+        if '|' in answer_line:
+            answers = answer_line.split('|')
+        else:
+            answers = [answer_line]
+        
+        for answer in answers:
+            if answer in results:
+                counter += 1
 
 
 
