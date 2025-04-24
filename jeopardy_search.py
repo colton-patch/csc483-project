@@ -38,6 +38,8 @@ class IRSystem:
                 # process last article
                 if docName is not None and tokens:
                     self._get_weights(docName, tokens) 
+
+
     def _get_weights(self, docName, tokens):
         # get frequencies
         termFreqs = collections.defaultdict(int)
@@ -83,24 +85,21 @@ class IRSystem:
             if term:
                 termFreqs[term] += 1
 
-        # replace term frequencies with logarithmic term frequencies
-        for term in termFreqs:
-            termFreqs[term] = 1 + math.log10(termFreqs[term])
-
         # get df
         docFreqs = collections.defaultdict(int)
         for term in termFreqs:
+            # replace term frequencies with logarithmic term frequencies
+            termFreqs[term] = 1 + math.log10(termFreqs[term])
+
             for doc in self.docWeights:
                 if term in self.docWeights[doc]:
                     docFreqs[term] += 1
-        # replace dfs with idfs
+
+        # replace dfs with idfs and calculate query weights
         n = len(self.docWeights)
+        queryWeights = {}
         for term in docFreqs:
             docFreqs[term] = math.log10(n / docFreqs[term])
-
-        # calculate query weights
-        queryWeights = {}
-        for term in termFreqs:
             queryWeights[term] = termFreqs[term] * docFreqs[term]
 
         # get similarity score
@@ -129,9 +128,12 @@ def main():
     with open('questions.txt', 'r') as f:
         lines = [line.strip().lower() for line in f.readlines()[:3]]
  
-    query = ' '.join(re.split(r'\W+', lines[0] + ' ' + lines[1]))
+    query = re.sub(r'[^a-zA-Z0-9\s]', '', lines[0] + ' ' + lines[1])
+    print(query)
     results = ir.run_query(query)
-    correct = send_to_llm(query, results, lines[2])
+    print(results)
+    # correct = send_to_llm(query, results, lines[2])
+    correct = lines[2] in results
 
     if correct:
         counter += 1
