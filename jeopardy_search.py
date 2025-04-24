@@ -111,7 +111,7 @@ class IRSystem:
                 simScores[docName] += self.docWeights[docName][term] * queryWeights[term] 
 
         # sort and get top 50
-        result = sorted(simScores, key=simScores.get, reverse=True)[:100]
+        result = sorted(simScores, key=simScores.get, reverse=True)[:50]
 
         return result
 
@@ -127,14 +127,24 @@ def main():
     counter = 0
 
     with open('questions.txt', 'r') as f:
-        lines = [line.strip().lower() for line in f.readlines()[:3]]
- 
-    query = ' '.join(re.split(r'\W+', lines[0] + ' ' + lines[1]))
-    results = ir.run_query(query)
-    correct = send_to_llm(query, results, lines[2])
+        lines = f.readlines()
+    for i in range(0, len(lines), 4):
+        if i + 2 >= len(lines):
+            break
+        queryLine = [lines[i].strip().lower(), lines[i+1].strip().lower()]
+        query = re.sub(r'[^a-zA-Z0-9\s]', '', queryLine[0] +' '+queryLine[1])
+        print(query)
+        results = ir.run_query(query)
+        answer_line = lines[i+2].strip()
+        if answer_line in results:
+            counter += 1
 
-    if correct:
-        counter += 1
+
+
+    ##correct = send_to_llm(query, results, lines[2])
+
+    ##if correct:
+        ##counter += 1
 
     print(f'Counter of Correct Answers: {counter}')
 
