@@ -34,10 +34,9 @@ class IRSystem:
                         docName = line[2:-2]
                         tokens = []
 
-                    else:
-                        # add tokenized line to tokens
-                        lowerLine = line.lower()
-                        tokens += re.split(r'[^a-zA-Z0-9]+', lowerLine)
+                    # add tokenized line to tokens
+                    lowerLine = line.lower()
+                    tokens += re.sub(r'[^a-zA-Z0-9\s]', '', lowerLine).split()
                 
                 # process last article
                 if docName is not None and tokens:
@@ -70,7 +69,8 @@ class IRSystem:
 
 
     def run_query(self, query):
-        terms = query.lower().split()
+        lowerQuery = query.lower()
+        terms = re.sub(r'[^a-zA-Z0-9\s]', '', lowerQuery).split()
         return self._run_query(terms)
 
     def _run_query(self, terms):
@@ -122,7 +122,7 @@ class IRSystem:
                 simScores[docName] += self.docWeights[docName][term] * queryWeights[term]            
 
         # sort and get top 10
-        result = sorted(simScores, key=simScores.get, reverse=True)[:10]
+        result = sorted(simScores, key=simScores.get, reverse=True)[:50]
 
         return result
 
