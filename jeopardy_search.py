@@ -29,10 +29,12 @@ class IRSystem:
                         # start new article, denoted by "[[article name]]"
                         docName = line[2:-2]
                         tokens = []
-                    else:
-                        # add tokenized line to tokens
-                        lowerLine = line.lower()
-                        tokens += re.split(r'\W+', lowerLine) 
+
+                    # add tokenized line to tokens
+                    lowerLine = line.lower()
+                    tokens += re.sub(r'[^a-zA-Z0-9\s]', '', lowerLine).split()
+                
+
                 # process last article
                 if docName is not None and tokens:
                     self._get_weights(docName, tokens) 
@@ -62,7 +64,8 @@ class IRSystem:
 
 
     def run_query(self, query):
-        terms = re.split(r'\W+', query.lower())
+        lowerQuery = query.lower()
+        terms = re.sub(r'[^a-zA-Z0-9\s]', '', lowerQuery).split()
         return self._run_query(terms)
 
     def _run_query(self, terms):
