@@ -115,10 +115,9 @@ class IRSystem:
 
         # sort and get top 50
         result = sorted(simScores, key=simScores.get, reverse=True)[:1000]
-
         return result
 
-    def calculate_mrr(self, results, correct_answers):
+      def calculate_mrr(self, results, correct_answers):
         reciprocal_rank_sum = 0
         for answer in correct_answers:
             rank = next((i + 1 for i, result in enumerate(results) if result == answer), 0)
@@ -140,7 +139,7 @@ def main():
             break
         queryLine = [lines[i].strip().lower(), lines[i+1].strip().lower()]
         query = re.sub(r'[^a-zA-Z0-9\s]', '', queryLine[0] +' '+queryLine[1])
-        print(query)
+        # print(query)
         results = ir.run_query(query)
 
         # check against answers
