@@ -1,7 +1,11 @@
+import openai
 import collections
 import math
 import os
 import re
+import time
+
+openai.api_key = "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"
 
 class IRSystem:
     def __init__(self, files):
@@ -81,9 +85,7 @@ class IRSystem:
         # Use ltn to weight terms in the query:
         #   l: logarithmic tf
         #   t: idf
-        #   n: no normalization
-
-        # Return the top-50 documents for the query 'terms'
+        #   c: cosine normalization
 
         termFreqs = collections.defaultdict(int)
 
@@ -92,19 +94,25 @@ class IRSystem:
             if term:
                 termFreqs[term] += 1
 
-        # replace term frequencies with logarithmic term frequencies
-        for term in termFreqs:
-            termFreqs[term] = 1 + math.log10(termFreqs[term])
-
         # calculate idfs and query weights
         n = len(self.docWeights)
         queryWeights = {}
+        sumSquares = 0  # for cosine normalization
+
         for term in termFreqs:
+            # replace term frequencies with logarithmic term frequencies
+            log_tf = 1 + math.log10(termFreqs[term])
             if self.docFreqs[term] != 0:
                 idf = math.log10(n / self.docFreqs[term])
             else:
                 idf = 0
-            queryWeights[term] = termFreqs[term] * idf
+            queryWeights[term] = log_tf * idf
+            sumSquares += queryWeights[term] ** 2  # accumulate square for norm
+
+        # cosine normalization
+        norm = math.sqrt(sumSquares) if sumSquares != 0 else 1
+        for term in queryWeights:
+            queryWeights[term] /= norm
 
         # get similarity score
         simScores = collections.defaultdict(int)
@@ -114,16 +122,56 @@ class IRSystem:
                     simScores[docName] += self.docWeights[term][docName] * queryWeights[term] 
 
         # sort and get top 50
-        result = sorted(simScores, key=simScores.get, reverse=True)[:1000]
+        result = sorted(simScores, key=simScores.get, reverse=True)[:50]
         return result
 
-      def calculate_mrr(self, results, correct_answers):
+    def calculate_mrr(self, results, correct_answers):
         reciprocal_rank_sum = 0
         for answer in correct_answers:
             rank = next((i + 1 for i, result in enumerate(results) if result == answer), 0)
             if rank > 0:
                 reciprocal_rank_sum += 1 / rank
         return reciprocal_rank_sum / len(correct_answers)
+
+  
+def rerank_with_llm(query, doc_titles, batch_size=50, max_retries=3):
+    reranked_scores = []
+    for i in range(0, len(doc_titles), batch_size):
+        batch = doc_titles[i:i+batch_size]
+        prompt = (
+            f"You are a trivia expert. Given the Jeopardy question:\n\n"
+            f"\"{query}\"\n\n"
+            f"Which of the following Wikipedia article titles is the best possible answer? "
+            f"Rerank all 20 titles in order of which is most likely the answer, with the most likely first. Give only the article names as they are written, no numbers.\n"
+        )
+        for j, title in enumerate(batch):
+            prompt += f"{j+1}. {title}\n"
+
+        for attempt in range(max_retries):
+            try:
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                )
+                # print("LLM Response:\n", response['choices'][0]['message']['content'])
+                break  # success, break out of retry loop
+            except openai.error.OpenAIError as e:
+                print(f"OpenAI error (attempt {attempt + 1}): {e}")
+                time.sleep(2 ** attempt)
+        else:
+            continue  # all retries failed, skip batch
+
+        answers = response['choices'][0]['message']['content'].split("\n")
+        for answer in answers:
+            reranked_scores.append(answer[3:].strip())
+
+        # print(reranked_scores)
+
+        time.sleep(1)  # avoid hitting rate limits
+
+    return reranked_scores if reranked_scores else doc_titles
+
 
 def main():
     ir = IRSystem(os.listdir("./wiki-subset-20140602"))
@@ -142,6 +190,8 @@ def main():
         # print(query)
         results = ir.run_query(query)
 
+        reranked_results = rerank_with_llm(query, results)
+
         # check against answers
         answer_line = lines[i+2].strip()
         if '|' in answer_line:
@@ -149,7 +199,7 @@ def main():
         else:
             answers = [answer_line]
         
-        counter += sum(1 for answer in answers if answer in results)
+        counter += sum(1 for answer in answers if answer == reranked_results[0])
         mrr_sum += ir.calculate_mrr(results, answers)
 
     print(f'Counter of Correct Answers: {counter}')
