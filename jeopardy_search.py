@@ -9,16 +9,19 @@ openai.api_key = "sk-proj-W95KznQw62gaZIlmHiXUiqrNUem5h6MXo9cgBxZC5gXxF2E-9Z_jTG
 
 class IRSystem:
     def __init__(self, files):
-        # Use lnc to weight terms in the documents:
-        #   l: logarithmic tf
-        #   n: no df
-        #   c: cosine normalization
+        # BM25 parameters
+        self.k1 = 1.2
+        self.b = 0.75
 
         # Store the vectorized representation for each document
-        #   and whatever information you need to vectorize queries in _run_query(...)
-
+        # and whatever information you need to vectorize queries in _run_query(...)
+        self.docLengths = {}
+        self.avgDocLength = 0
         self.docWeights = {}
         self.docFreqs = collections.defaultdict(int)
+
+        totalLength = 0
+        docCount = 0
 
         for filename in files:
             with open(os.path.join("./wiki-subset-20140602", filename), encoding="UTF-8") as f:
@@ -30,6 +33,8 @@ class IRSystem:
                     if line.startswith("[[") and line.endswith("]]"):
                         if docName is not None and tokens:
                             self._get_weights(docName, tokens)
+                            totalLength += len(tokens)
+                            docCount += 1
                         # start new article, denoted by "[[article name]]"
                         docName = line[2:-2]
                         tokens = []
@@ -40,15 +45,13 @@ class IRSystem:
                     for token in curTokens:
                         tokens.append(token)
 
-                        # count doc frequency of tokens
-                        if token not in self.docFreqs:
-                            self.docFreqs[token] = 0
-                        self.docFreqs[token] += 1    
-
                 # process last article
                 if docName is not None and tokens:
-                    self._get_weights(docName, tokens) 
+                    self._get_weights(docName, tokens)
+                    totalLength += len(tokens)
+                    docCount += 1
 
+        self.avgDocLength = totalLength / docCount
 
     def _get_weights(self, docName, tokens):
         # get frequencies
@@ -57,24 +60,14 @@ class IRSystem:
             if token:
                 termFreqs[token] += 1
 
-                # make the entry for each term a dict with docNames as keys and weights as values
-                if token not in self.docWeights:
-                    self.docWeights[token] = collections.defaultdict(int)
-
-        sumSquares = 0
+        self.docLengths[docName] = len(tokens)
 
         for term in termFreqs:
-            # replace the values in termFreqs with the logarithmic vals
-            termFreqs[term] = 1 + math.log10(termFreqs[term])
-            # add the square of the logTf to get vector
-            sumSquares += termFreqs[term] ** 2
-
-        sqrt = math.sqrt(sumSquares)
-
-        # get normalized weight for each term
-        for term in termFreqs:
-            self.docWeights[term][docName] = termFreqs[term] / sqrt
-
+            # Ensure the term is initialized in self.docWeights
+            if term not in self.docWeights:
+                self.docWeights[term] = collections.defaultdict(int)
+            self.docWeights[term][docName] = termFreqs[term]
+            self.docFreqs[term] += 1
 
     def run_query(self, query):
         lowerQuery = query.lower()
@@ -82,44 +75,25 @@ class IRSystem:
         return self._run_query(terms)
 
     def _run_query(self, terms):
-        # Use ltn to weight terms in the query:
-        #   l: logarithmic tf
-        #   t: idf
-        #   c: cosine normalization
+        # Use BM25 to rank documents
+        n = len(self.docLengths)
+        queryWeights = collections.defaultdict(int)
 
-        termFreqs = collections.defaultdict(int)
-
-        # count term freqs
+        # calculate idfs
         for term in terms:
-            if term:
-                termFreqs[term] += 1
-
-        # calculate idfs and query weights
-        n = len(self.docWeights)
-        queryWeights = {}
-        sumSquares = 0  # for cosine normalization
-
-        for term in termFreqs:
-            # replace term frequencies with logarithmic term frequencies
-            log_tf = 1 + math.log10(termFreqs[term])
             if self.docFreqs[term] != 0:
-                idf = math.log10(n / self.docFreqs[term])
-            else:
-                idf = 0
-            queryWeights[term] = log_tf * idf
-            sumSquares += queryWeights[term] ** 2  # accumulate square for norm
-
-        # cosine normalization
-        norm = math.sqrt(sumSquares) if sumSquares != 0 else 1
-        for term in queryWeights:
-            queryWeights[term] /= norm
+                idf = math.log10((n - self.docFreqs[term] + 0.5) / (self.docFreqs[term] + 0.5))
+                queryWeights[term] = idf
 
         # get similarity score
         simScores = collections.defaultdict(int)
-        for term in termFreqs:
+        for term in terms:
             if queryWeights[term] > 0:
                 for docName in self.docWeights[term]:
-                    simScores[docName] += self.docWeights[term][docName] * queryWeights[term] 
+                    tf = self.docWeights[term][docName]
+                    docLength = self.docLengths[docName]
+                    score = queryWeights[term] * ((tf * (self.k1 + 1)) / (tf + self.k1 * (1 - self.b + self.b * (docLength / self.avgDocLength))))
+                    simScores[docName] += score
 
         # sort and get top 50
         result = sorted(simScores, key=simScores.get, reverse=True)[:50]
@@ -182,27 +156,26 @@ def main():
     with open('questions.txt', 'r') as f:
         lines = f.readlines()
 
-    for i in range(0, len(lines), 4):
-        if i + 2 >= len(lines):
-            break
-        queryLine = [lines[i].strip().lower(), lines[i+1].strip().lower()]
-        query = re.sub(r'[^a-zA-Z0-9\s]', '', queryLine[0] +' '+queryLine[1])
-        # print(query)
-        results = ir.run_query(query)
+        for i in range(0, len(lines), 4):
+            if i + 2 >= len(lines):
+                break
+            queryLine = [lines[i].strip().lower(), lines[i+1].strip().lower()]
+            query = re.sub(r'[^a-zA-Z0-9\s]', '', queryLine[0] +' '+queryLine[1])
+            results = ir.run_query(query)
 
-        reranked_results = rerank_with_llm(query, results)
+            reranked_results = rerank_with_llm(query, results)
 
-        # check against answers
-        answer_line = lines[i+2].strip()
-        if '|' in answer_line:
-            answers = answer_line.split('|')
-        else:
-            answers = [answer_line]
-        
-        counter += sum(1 for answer in answers if answer == reranked_results[0])
-        mrr_sum += ir.calculate_mrr(results, answers)
+            # check against answers
+            answer_line = lines[i+2].strip()
+            if '|' in answer_line:
+                answers = answer_line.split('|')
+            else:
+                answers = [answer_line]
+            
+            counter += sum(1 for answer in answers if answer == reranked_results[0])
+            mrr_sum += ir.calculate_mrr(reranked_results, answers)
 
-    print(f'Counter of Correct Answers: {counter}')
+    print(f'Precision: {counter / 100}')
     print(f'Mean Reciprocal Rank (MRR): {mrr_sum / (100)}')
 
 if __name__ == '__main__':
